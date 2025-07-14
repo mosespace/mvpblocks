@@ -1,43 +1,42 @@
 'use client';
 
-import { useChat } from 'ai/react';
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { cn } from '@/lib/utils';
-import { useMediaQuery } from '@/hooks/use-media-query';
+import { MemoizedMarkdown } from '@/components/memoized-markdown';
 import {
   Dialog,
   DialogContent,
-  DialogHeader,
-  DialogFooter,
-  DialogTrigger,
   DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTrigger,
 } from '@/components/ui/dialog';
 import {
   Drawer,
   DrawerContent,
-  DrawerHeader,
-  DrawerTitle,
   DrawerDescription,
   DrawerFooter,
+  DrawerHeader,
   DrawerTrigger,
 } from '@/components/ui/drawer';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Input } from '@/components/ui/input';
-import { MemoizedMarkdown } from '@/components/memoized-markdown';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { useMediaQuery } from '@/hooks/use-media-query';
+import { cn } from '@/lib/utils';
+import { useChat } from 'ai/react';
 import {
+  AlertTriangleIcon,
   CornerDownLeftIcon,
   FileCodeIcon,
   GlobeIcon,
   Loader2Icon,
   MousePointerClickIcon,
+  RefreshCwIcon,
   SparklesIcon,
+  SquareIcon,
   TrashIcon,
   UserIcon,
   ZapIcon,
-  SquareIcon,
-  AlertTriangleIcon,
-  RefreshCwIcon,
 } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from './ui/button';
 
 const timeFormatter = new Intl.DateTimeFormat('en-US', {
