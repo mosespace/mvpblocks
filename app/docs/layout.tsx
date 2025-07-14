@@ -1,9 +1,9 @@
-import { DocsLayout, type DocsLayoutProps } from 'fumadocs-ui/layouts/notebook';
-import type { ReactNode } from 'react';
 import { baseOptions } from '@/app/layout.config';
 import { source } from '@/lib/source';
+import { DocsLayout } from 'fumadocs-ui/layouts/notebook';
 import { RootProvider } from 'fumadocs-ui/provider';
 import dynamic from 'next/dynamic';
+import type { ReactNode } from 'react';
 
 const Assistant = dynamic(() => import('@/components/assistant'));
 
