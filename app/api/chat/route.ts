@@ -8,7 +8,11 @@ import { z } from 'zod';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
 
-const getComponentCode = async (item: any) => {
+const getComponentCode = async (
+  item: any,
+  includeCode: boolean = false,
+  maxCodeLength: number = 1500,
+) => {
   if (!item || !item.files || item.files.length === 0) {
     return null;
   }
@@ -17,23 +21,45 @@ const getComponentCode = async (item: any) => {
   const normalizedPath = filePath.replace(/^@\//, '').replace(/^\//, '');
   const fullPath = path.join(process.cwd(), normalizedPath);
 
-  try {
-    const code = await fs.readFile(fullPath, 'utf-8');
+  let codeContent = null;
+  let codeIsTruncated = false;
 
-    return {
-      name: item.name,
-      type: item.type,
-      path: filePath,
-      code: code,
-      dependencies: item.dependencies || [],
-      registryDependencies: item.registryDependencies || [],
-      link: `https://blocks.mvp-subha.me/r/${item.name}.json`,
-      installCommand: `npx shadcn@latest add https://blocks.mvp-subha.me/r/${item.name}.json`,
-    };
-  } catch (error) {
-    console.error(`Error reading file ${fullPath}:`, error);
-    return null;
+  if (includeCode) {
+    try {
+      const fullCode = await fs.readFile(fullPath, 'utf-8');
+      if (fullCode.length > maxCodeLength) {
+        codeContent =
+          fullCode.substring(0, maxCodeLength) +
+          '\n\n// ... code truncated, view full code at link provided above ...';
+        codeIsTruncated = true;
+      } else {
+        codeContent = fullCode;
+      }
+    } catch (error) {
+      console.error(`Error reading file ${fullPath}:`, error);
+      codeContent = `Error: Could not read code from ${fullPath}`;
+    }
   }
+
+  return {
+    name: item.name,
+    type: item.type,
+    path: filePath,
+    code: codeContent,
+    codeIsTruncated: codeIsTruncated,
+    dependencies: item.dependencies || [],
+    registryDependencies: item.registryDependencies || [],
+    link: `https://blocks.mvp-subha.me/r/${item.name}.json`,
+    installCommand: `npx shadcn@latest add https://blocks.mvp-subha.me/r/${item.name}.json`,
+  };
+};
+
+const sanitizeComponentName = (name: string) => {
+  return name
+    .replace(/[^a-zA-Z0-9]/g, '')
+    .split(' ')
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join('');
 };
 
 const findSimilarComponents = (name: string, maxResults = 5) => {
@@ -192,11 +218,11 @@ When a user asks about a component:
   - 🔧 Available props (if applicable)
   - 💬 Related components
   - 🔗 Direct link to the component on MVPBlocks website
-  - 🧩 The actual implementation code with proper indentation
-
++  🧩 Do NOT provide the full implementation code unless explicitly asked for it by the user, or if it's the code for a NEW component you are creating. Instead, provide the direct link to the component's JSON to allow the user to install it via CLI or view the code themselves via the provided link.
 📦 For Dependencies:
   - NPM dependencies: Install via package manager (e.g., \`npm install [dependency-name]\`)
   - Registry dependencies: Reference by URL in component registration (e.g., \`https://blocks.mvp-subha.me/r/[component-name].json\`)
+  -Do not show your thinking process to the user, only show the answer.
 
 📋 Code Formatting Requirements:
   - Always format code with proper indentation using tabs
@@ -270,17 +296,12 @@ export async function POST(req: Request) {
             name: z.string().describe('The name of the component to fetch'),
           }),
           execute: async ({ name }) => {
-            // Find the exact component by name
             const component = registry.find((item) => item.name === name);
 
             if (component) {
-              // Get the component code
-              const componentWithCode = await getComponentCode(component);
-              return componentWithCode
-                ? JSON.stringify(componentWithCode)
-                : null;
+              const componentDetails = await getComponentCode(component, false);
+              return componentDetails ? JSON.stringify(componentDetails) : null;
             } else {
-              // If component not found, find similar components
               const similarComponents = findSimilarComponents(name);
               return JSON.stringify({
                 found: false,
@@ -337,8 +358,11 @@ export async function POST(req: Request) {
               }
 
               // Get the component code
-              const componentWithCode = await getComponentCode(component);
-
+              const componentWithCode = await getComponentCode(
+                component,
+                true,
+                2500,
+              ); // Allow more length for direct request
               return componentWithCode
                 ? JSON.stringify({
                     component: componentWithCode,
@@ -359,64 +383,159 @@ export async function POST(req: Request) {
         }),
         generateComponent: tool({
           description:
-            'Generate a new component by combining existing components',
+            'Generate a new component by combining existing components. This tool will provide a basic structure and include the necessary imports and placeholder usage of the building blocks. The AI should then fill in the detailed JSX structure.',
           parameters: z.object({
             componentName: z
               .string()
-              .describe('The name of the component to generate'),
+              .describe(
+                'The descriptive name of the component to generate (e.g., "Chatbot UI", "Product Card Grid")',
+              ),
             componentType: z
               .string()
               .describe(
-                'The type of component to generate (e.g., chatbot, form, card)',
+                'The general type or category of the new component (e.g., "chatbot", "form", "card layout")',
               ),
-            buildingBlocks: z
+            buildingBlockNames: z
               .array(z.string())
-              .describe('Array of component names to use as building blocks'),
+              .describe(
+                'Array of names of existing components to use as building blocks (e.g., ["Button", "Input", "Card"])',
+              ),
+            description: z
+              .string()
+              .optional()
+              .describe(
+                'A brief description of what the new component does and how it uses its building blocks.',
+              ),
           }),
-          execute: async ({ componentName, componentType, buildingBlocks }) => {
+          execute: async ({
+            componentName,
+            componentType,
+            buildingBlockNames,
+            description,
+          }) => {
             try {
-              // Get the building block components
-              const components = await Promise.all(
-                buildingBlocks.map(async (name) => {
+              const buildingBlocksWithCode = await Promise.all(
+                buildingBlockNames.map(async (name) => {
                   const component = registry.find((item) => item.name === name);
                   if (!component) return null;
-                  return await getComponentCode(component);
+                  return await getComponentCode(component, true, 99999);
                 }),
               );
 
-              // Filter out null components
-              const validComponents = components.filter((c) => c !== null);
+              const validBuildingBlocks = buildingBlocksWithCode.filter(
+                (c) => c !== null,
+              );
 
-              // Get all dependencies from the building blocks
+              if (validBuildingBlocks.length === 0) {
+                return JSON.stringify({
+                  error: 'No valid building blocks found',
+                  message:
+                    'Could not find any of the specified building blocks in the registry.',
+                  requestedBuildingBlocks: buildingBlockNames,
+                });
+              }
+
               const allDependencies = new Set<string>();
               const allRegistryDependencies = new Set<string>();
+              const importStatements: string[] = [];
+              const usageExamples: string[] = [];
 
-              validComponents.forEach((component) => {
-                if (component?.dependencies) {
-                  component.dependencies.forEach((dep: string) =>
-                    allDependencies.add(dep),
-                  );
-                }
-                if (component?.registryDependencies) {
-                  component.registryDependencies.forEach((dep: string) =>
-                    allRegistryDependencies.add(dep),
-                  );
+              validBuildingBlocks.forEach((block) => {
+                if (block) {
+                  // Collect NPM dependencies
+                  if (block.dependencies) {
+                    block.dependencies.forEach((dep: string) =>
+                      allDependencies.add(dep),
+                    );
+                  }
+                  // Collect Registry dependencies (these are components themselves)
+                  if (block.registryDependencies) {
+                    block.registryDependencies.forEach((dep: string) =>
+                      allRegistryDependencies.add(dep),
+                    );
+                  }
+
+                  // Generate import statement for the building block
+                  if (block.path && block.name) {
+                    const relativePath = block.path.replace(/^@\//, '@/');
+                    const importName = block.name
+                      .split('-')
+                      .map(
+                        (part: any) =>
+                          part.charAt(0).toUpperCase() + part.slice(1),
+                      )
+                      .join('');
+                    importStatements.push(
+                      `import { ${importName} } from '${relativePath.replace('.tsx', '')}';`,
+                    );
+                    usageExamples.push(`<${importName} />`);
+                  }
                 }
               });
 
+              // Construct a basic component structure
+              const sanitizedComponentName =
+                sanitizeComponentName(componentName);
+
+              const generatedCodeTemplate = `
+// components/${sanitizedComponentName}.tsx
+import React from 'react';
+${importStatements.join('\n')}
+
+// Consider adding more specific imports based on component logic, e.g.,
+// import { Input } from '@/components/ui/input';
+// import { Button } from '@/components/ui/button';
+
+export const ${sanitizedComponentName} = () => {
+	return (
+		<div className="p-4 border rounded-lg shadow-sm">
+			<h2 className="text-xl font-semibold mb-4">${componentName}</h2>
+			<p className="text-gray-600 mb-6">${description || 'This is a new component generated by combining existing MVPBlocks.'}</p>
+			{/* Start of Building Blocks */}
+${usageExamples.map((example) => `\t\t\t${example}`).join('\n')}
+			{/* End of Building Blocks */}
+			{/* Add your custom logic and layout here to arrange the building blocks */}
+			{/* Example: */}
+			{/*
+			<div className="flex flex-col gap-4">
+				<Input placeholder="Enter your message..." />
+				<Button>Send</Button>
+			</div>
+			*/}
+		</div>
+	);
+};
+`;
+
               return JSON.stringify({
-                componentName,
+                success: true,
+                componentName: sanitizedComponentName,
                 componentType,
-                buildingBlocks: validComponents,
-                dependencies: Array.from(allDependencies),
-                registryDependencies: Array.from(allRegistryDependencies),
-                message: `Generated component information for "${componentName}" of type "${componentType}" using ${validComponents.length} building blocks.`,
+                description,
+                buildingBlocksUsed: validBuildingBlocks.map((b) => b?.name),
+                npmDependencies: Array.from(allDependencies),
+                registryDependencies: Array.from(allRegistryDependencies)
+                  .map((depName) => {
+                    const depItem = registry.find(
+                      (item) => item.name === depName,
+                    );
+                    return depItem
+                      ? {
+                          name: depItem.name,
+                          installCommand: `npx shadcn@latest add https://blocks.mvp-subha.me/r/${depItem.name}.json`,
+                        }
+                      : null;
+                  })
+                  .filter(Boolean),
+                generatedCodeTemplate,
+                message: `Prepared a template for "${sanitizedComponentName}". You can now provide the full code using this template.`,
               });
             } catch (error) {
               console.error('Error generating component:', error);
               return JSON.stringify({
                 error: 'Failed to generate component',
                 message: 'An error occurred while generating the component',
+                details: (error as Error).message,
               });
             }
           },
